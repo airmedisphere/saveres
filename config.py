@@ -25,14 +25,29 @@ ERROR_MESSAGE = bool(os.environ.get('ERROR_MESSAGE', True))
 # Download directory
 DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "./downloads/")
 
-# Max concurrent downloads
-MAX_CONCURRENT_DOWNLOADS = int(os.environ.get("MAX_CONCURRENT_DOWNLOADS", "5"))
+# Ultra-fast download settings
+MAX_CONCURRENT_DOWNLOADS = int(os.environ.get("MAX_CONCURRENT_DOWNLOADS", "20"))  # Increased from 5
+MAX_CONCURRENT_UPLOADS = int(os.environ.get("MAX_CONCURRENT_UPLOADS", "10"))     # New setting
+CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "1048576"))  # 1MB chunks for faster transfer
+MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "5"))      # Retry failed downloads
 
-# Download timeout in seconds
-DOWNLOAD_TIMEOUT = int(os.environ.get("DOWNLOAD_TIMEOUT", "300"))
+# Timeout settings (optimized)
+DOWNLOAD_TIMEOUT = int(os.environ.get("DOWNLOAD_TIMEOUT", "600"))  # 10 minutes
+UPLOAD_TIMEOUT = int(os.environ.get("UPLOAD_TIMEOUT", "600"))      # 10 minutes
+CONNECTION_TIMEOUT = int(os.environ.get("CONNECTION_TIMEOUT", "30")) # 30 seconds
 
-# Max file size in MB
-MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE", "2000"))
+# Max file size in MB (increased)
+MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE", "4000"))  # 4GB
 
 # Enable logging
 ENABLE_LOGGING = bool(os.environ.get("ENABLE_LOGGING", True))
+
+# Performance settings
+WORKERS = int(os.environ.get("WORKERS", "200"))  # Increased workers
+SLEEP_THRESHOLD = int(os.environ.get("SLEEP_THRESHOLD", "5"))  # Reduced sleep threshold
+
+# Progress update frequency (in seconds)
+PROGRESS_UPDATE_INTERVAL = int(os.environ.get("PROGRESS_UPDATE_INTERVAL", "2"))
+
+# Enable direct streaming (faster for large files)
+ENABLE_STREAMING = bool(os.environ.get("ENABLE_STREAMING", True))
