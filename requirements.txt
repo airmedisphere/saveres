@@ -1,8 +1,11 @@
 pyrofork==2.3.45
 tgcrypto
 motor
-Flask==1.1.2
-gunicorn==20.1.0
-Jinja2==3.0.3
-werkzeug==2.0.2
-itsdangerous==2.0.1
+Flask==2.3.3
+gunicorn==21.2.0
+Jinja2==3.1.2
+werkzeug==2.3.7
+itsdangerous==2.1.2
+aiofiles==23.2.1
+asyncio-throttle==1.0.2
+redis==5.0.1

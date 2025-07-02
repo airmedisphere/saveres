@@ -17,72 +17,170 @@ from pyrogram.errors import (
 )
 from config import API_ID, API_HASH
 from database.db import db
+from utils.logger import log_error, log_info
+from TechVJ.advanced_downloader import advanced_downloader
 
 SESSION_STRING_SIZE = 351
 
 @Client.on_message(filters.private & ~filters.forwarded & filters.command(["logout"]))
 async def logout(client, message):
-    user_data = await db.get_session(message.from_user.id)  
-    if user_data is None:
-        return 
-    await db.set_session(message.from_user.id, session=None)  
-    await message.reply("**Logout Successfully** ♦")
+    try:
+        user_data = await db.get_session(message.from_user.id)  
+        if user_data is None:
+            await message.reply("❌ **You are not logged in.**")
+            return 
+        
+        # Close active session
+        await advanced_downloader.close_user_session(message.from_user.id)
+        
+        # Remove session from database
+        await db.set_session(message.from_user.id, session=None)  
+        await message.reply("✅ **Logged out successfully!**")
+        
+        log_info(f"User {message.from_user.id} logged out")
+        
+    except Exception as e:
+        log_error(e, "logout")
+        await message.reply("❌ **Error during logout. Please try again.**")
 
 @Client.on_message(filters.private & ~filters.forwarded & filters.command(["login"]))
 async def main(bot: Client, message: Message):
-    user_data = await db.get_session(message.from_user.id)
-    if user_data is not None:
-        await message.reply("**Your Are Already Logged In. First /logout Your Old Session. Then Do Login.**")
-        return 
-    user_id = int(message.from_user.id)
-    phone_number_msg = await bot.ask(chat_id=user_id, text="<b>Please send your phone number which includes country code</b>\n<b>Example:</b> <code>+13124562345, +9171828181889</code>")
-    if phone_number_msg.text=='/cancel':
-        return await phone_number_msg.reply('<b>process cancelled !</b>')
-    phone_number = phone_number_msg.text
-    client = Client(":memory:", API_ID, API_HASH)
-    await client.connect()
-    await phone_number_msg.reply("Sending OTP...")
-    try:
-        code = await client.send_code(phone_number)
-        phone_code_msg = await bot.ask(user_id, "Please check for an OTP in official telegram account. If you got it, send OTP here after reading the below format. \n\nIf OTP is `12345`, **please send it as** `1 2 3 4 5`.\n\n**Enter /cancel to cancel The Procces**", filters=filters.text, timeout=600)
-    except PhoneNumberInvalid:
-        await phone_number_msg.reply('`PHONE_NUMBER` **is invalid.**')
-        return
-    if phone_code_msg.text=='/cancel':
-        return await phone_code_msg.reply('<b>process cancelled !</b>')
-    try:
-        phone_code = phone_code_msg.text.replace(" ", "")
-        await client.sign_in(phone_number, code.phone_code_hash, phone_code)
-    except PhoneCodeInvalid:
-        await phone_code_msg.reply('**OTP is invalid.**')
-        return
-    except PhoneCodeExpired:
-        await phone_code_msg.reply('**OTP is expired.**')
-        return
-    except SessionPasswordNeeded:
-        two_step_msg = await bot.ask(user_id, '**Your account has enabled two-step verification. Please provide the password.\n\nEnter /cancel to cancel The Procces**', filters=filters.text, timeout=300)
-        if two_step_msg.text=='/cancel':
-            return await two_step_msg.reply('<b>process cancelled !</b>')
-        try:
-            password = two_step_msg.text
-            await client.check_password(password=password)
-        except PasswordHashInvalid:
-            await two_step_msg.reply('**Invalid Password Provided**')
-            return
-    string_session = await client.export_session_string()
-    await client.disconnect()
-    if len(string_session) < SESSION_STRING_SIZE:
-        return await message.reply('<b>invalid session sring</b>')
     try:
         user_data = await db.get_session(message.from_user.id)
-        if user_data is None:
-            uclient = Client(":memory:", session_string=string_session, api_id=API_ID, api_hash=API_HASH)
-            await uclient.connect()
+        if user_data is not None:
+            await message.reply(
+                "⚠️ **You are already logged in!**\n\n"
+                "Use /logout to logout first, then login again."
+            )
+            return 
+        
+        user_id = int(message.from_user.id)
+        
+        # Step 1: Get phone number
+        phone_number_msg = await bot.ask(
+            chat_id=user_id, 
+            text="📱 **Please send your phone number**\n\n"
+                 "**Format:** Include country code\n"
+                 "**Example:** `+1234567890`\n\n"
+                 "Send /cancel to cancel the process.",
+            timeout=300
+        )
+        
+        if phone_number_msg.text == '/cancel':
+            return await phone_number_msg.reply('❌ **Login cancelled!**')
+        
+        phone_number = phone_number_msg.text.strip()
+        
+        # Validate phone number format
+        if not phone_number.startswith('+') or len(phone_number) < 10:
+            await phone_number_msg.reply(
+                "❌ **Invalid phone number format!**\n\n"
+                "Please include country code (e.g., +1234567890)"
+            )
+            return
+        
+        # Step 2: Send OTP
+        client = Client(":memory:", API_ID, API_HASH)
+        await client.connect()
+        
+        loading_msg = await phone_number_msg.reply("📤 **Sending OTP...**")
+        
+        try:
+            code = await client.send_code(phone_number)
+            await loading_msg.edit("✅ **OTP sent successfully!**")
+        except PhoneNumberInvalid:
+            await loading_msg.edit('❌ **Invalid phone number!**')
+            await client.disconnect()
+            return
+        except Exception as e:
+            await loading_msg.edit(f'❌ **Error sending OTP:** {str(e)}')
+            await client.disconnect()
+            return
+        
+        # Step 3: Get OTP
+        phone_code_msg = await bot.ask(
+            user_id, 
+            "🔐 **Enter the OTP you received**\n\n"
+            "**Format:** Separate digits with spaces\n"
+            "**Example:** If OTP is `12345`, send `1 2 3 4 5`\n\n"
+            "Send /cancel to cancel the process.",
+            filters=filters.text, 
+            timeout=300
+        )
+        
+        if phone_code_msg.text == '/cancel':
+            await client.disconnect()
+            return await phone_code_msg.reply('❌ **Login cancelled!**')
+        
+        try:
+            phone_code = phone_code_msg.text.replace(" ", "").strip()
+            await client.sign_in(phone_number, code.phone_code_hash, phone_code)
+        except PhoneCodeInvalid:
+            await phone_code_msg.reply('❌ **Invalid OTP!**')
+            await client.disconnect()
+            return
+        except PhoneCodeExpired:
+            await phone_code_msg.reply('❌ **OTP expired! Please try again.**')
+            await client.disconnect()
+            return
+        except SessionPasswordNeeded:
+            # Step 4: Handle 2FA
+            two_step_msg = await bot.ask(
+                user_id, 
+                "🔒 **Two-Factor Authentication Enabled**\n\n"
+                "Please enter your 2FA password:\n\n"
+                "Send /cancel to cancel the process.",
+                filters=filters.text, 
+                timeout=300
+            )
+            
+            if two_step_msg.text == '/cancel':
+                await client.disconnect()
+                return await two_step_msg.reply('❌ **Login cancelled!**')
+            
+            try:
+                password = two_step_msg.text.strip()
+                await client.check_password(password=password)
+            except PasswordHashInvalid:
+                await two_step_msg.reply('❌ **Invalid 2FA password!**')
+                await client.disconnect()
+                return
+        
+        # Step 5: Generate session string
+        processing_msg = await bot.send_message(user_id, "⚙️ **Processing login...**")
+        
+        try:
+            string_session = await client.export_session_string()
+            await client.disconnect()
+            
+            if len(string_session) < SESSION_STRING_SIZE:
+                await processing_msg.edit('❌ **Invalid session string generated!**')
+                return
+            
+            # Save session to database
             await db.set_session(message.from_user.id, session=string_session)
+            
+            # Success message
+            await processing_msg.edit(
+                "🎉 **Login successful!**\n\n"
+                "✅ You can now download restricted content\n"
+                "🔐 Your session is securely stored\n\n"
+                "**Note:** If you get AUTH_KEY errors, /logout and /login again."
+            )
+            
+            log_info(f"User {message.from_user.id} logged in successfully")
+            
+        except Exception as e:
+            await processing_msg.edit(f"❌ **Login error:** {str(e)}")
+            await client.disconnect()
+            log_error(e, f"login for user {message.from_user.id}")
+            return
+            
+    except TimeoutError:
+        await message.reply("⏰ **Login timeout! Please try again.**")
     except Exception as e:
-        return await message.reply_text(f"<b>ERROR IN LOGIN:</b> `{e}`")
-    await bot.send_message(message.from_user.id, "<b>Account Login Successfully.\n\nIf You Get Any Error Related To AUTH KEY Then /logout first and /login again</b>")
-
+        log_error(e, f"main login for user {message.from_user.id}")
+        await message.reply("❌ **Unexpected error during login. Please try again.**")
 
 # Don't Remove Credit Tg - @VJ_Botz
 # Subscribe YouTube Channel For Amazing Bot https://youtube.com/@Tech_VJ
