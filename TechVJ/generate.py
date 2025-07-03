@@ -18,7 +18,7 @@ from pyrogram.errors import (
 from config import API_ID, API_HASH
 from database.db import db
 from utils.logger import log_error, log_info
-from TechVJ.advanced_downloader import advanced_downloader
+from TechVJ.ultra_downloader import ultra_downloader
 
 SESSION_STRING_SIZE = 351
 
@@ -31,7 +31,7 @@ async def logout(client, message):
             return 
         
         # Close active session
-        await advanced_downloader.close_user_session(message.from_user.id)
+        await ultra_downloader.close_user_session(message.from_user.id)
         
         # Remove session from database
         await db.set_session(message.from_user.id, session=None)  
@@ -164,7 +164,9 @@ async def main(bot: Client, message: Message):
             await processing_msg.edit(
                 "🎉 **Login successful!**\n\n"
                 "✅ You can now download restricted content\n"
-                "🔐 Your session is securely stored\n\n"
+                "🔐 Your session is securely stored\n"
+                "⚡ Ultra-fast downloads enabled\n"
+                "📄 Original format preservation active\n\n"
                 "**Note:** If you get AUTH_KEY errors, /logout and /login again."
             )
             
