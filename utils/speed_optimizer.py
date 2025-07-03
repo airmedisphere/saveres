@@ -1,6 +1,8 @@
 import asyncio
 import aiofiles
 import time
+import os
+import mimetypes
 from typing import Optional, Callable, Any
 from pyrogram import Client
 from pyrogram.types import Message
@@ -17,7 +19,7 @@ class SpeedOptimizer:
     
     async def optimized_download(self, client: Client, message: Message, 
                                file_path: str, progress_callback: Optional[Callable] = None) -> bool:
-        """Ultra-fast download with speed optimization"""
+        """Ultra-fast download with speed optimization and original format preservation"""
         try:
             start_time = time.time()
             user_id = getattr(client, 'user_id', 0)
@@ -38,7 +40,7 @@ class SpeedOptimizer:
                         await progress_callback(current, total, speed)
                         self.last_progress_update[user_id] = now
             
-            # Download with optimized settings
+            # Download with optimized settings - preserve original filename and format
             downloaded_file = await client.download_media(
                 message,
                 file_name=file_path,
@@ -52,10 +54,113 @@ class SpeedOptimizer:
             log_error(e, f"optimized_download: {file_path}")
             return False
     
+    def get_media_type_and_attributes(self, message: Message, file_path: str) -> tuple:
+        """Determine the correct media type and extract attributes from the original message"""
+        try:
+            # Get file extension and MIME type
+            file_extension = os.path.splitext(file_path)[1].lower()
+            mime_type, _ = mimetypes.guess_type(file_path)
+            
+            # Extract attributes from the original message
+            if message.photo:
+                return 'photo', {
+                    'width': message.photo.width,
+                    'height': message.photo.height
+                }
+            
+            elif message.video:
+                return 'video', {
+                    'duration': message.video.duration,
+                    'width': message.video.width,
+                    'height': message.video.height,
+                    'thumb': message.video.thumbs[0] if message.video.thumbs else None,
+                    'supports_streaming': True
+                }
+            
+            elif message.animation:
+                return 'animation', {
+                    'duration': message.animation.duration,
+                    'width': message.animation.width,
+                    'height': message.animation.height,
+                    'thumb': message.animation.thumbs[0] if message.animation.thumbs else None
+                }
+            
+            elif message.audio:
+                return 'audio', {
+                    'duration': message.audio.duration,
+                    'performer': message.audio.performer,
+                    'title': message.audio.title,
+                    'thumb': message.audio.thumbs[0] if message.audio.thumbs else None
+                }
+            
+            elif message.voice:
+                return 'voice', {
+                    'duration': message.voice.duration
+                }
+            
+            elif message.video_note:
+                return 'video_note', {
+                    'duration': message.video_note.duration,
+                    'length': message.video_note.length,
+                    'thumb': message.video_note.thumbs[0] if message.video_note.thumbs else None
+                }
+            
+            elif message.sticker:
+                return 'sticker', {
+                    'width': message.sticker.width,
+                    'height': message.sticker.height,
+                    'is_animated': message.sticker.is_animated,
+                    'is_video': message.sticker.is_video,
+                    'set_name': message.sticker.set_name,
+                    'emoji': message.sticker.emoji
+                }
+            
+            elif message.document:
+                # Check if it's a specific media type based on MIME type or extension
+                if mime_type:
+                    if mime_type.startswith('image/'):
+                        return 'photo', {}
+                    elif mime_type.startswith('video/'):
+                        return 'video', {
+                            'supports_streaming': True
+                        }
+                    elif mime_type.startswith('audio/'):
+                        return 'audio', {}
+                
+                # Check by file extension
+                if file_extension in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']:
+                    if file_extension == '.gif':
+                        return 'animation', {}
+                    return 'photo', {}
+                elif file_extension in ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp']:
+                    return 'video', {
+                        'supports_streaming': True
+                    }
+                elif file_extension in ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.m4a', '.wma']:
+                    return 'audio', {}
+                elif file_extension in ['.webm'] and message.document.mime_type == 'video/webm':
+                    return 'video', {
+                        'supports_streaming': True
+                    }
+                
+                # Default to document for unknown types
+                return 'document', {
+                    'file_name': message.document.file_name,
+                    'mime_type': message.document.mime_type
+                }
+            
+            # Default fallback
+            return 'document', {}
+            
+        except Exception as e:
+            log_error(e, f"get_media_type_and_attributes")
+            return 'document', {}
+    
     async def optimized_upload(self, client: Client, chat_id: int, file_path: str,
                              caption: str = None, reply_to_message_id: int = None,
-                             progress_callback: Optional[Callable] = None) -> bool:
-        """Ultra-fast upload with speed optimization"""
+                             progress_callback: Optional[Callable] = None,
+                             original_message: Message = None) -> bool:
+        """Ultra-fast upload with original format preservation"""
         try:
             start_time = time.time()
             user_id = getattr(client, 'user_id', 0)
@@ -75,39 +180,99 @@ class SpeedOptimizer:
                         await progress_callback(current, total, speed)
                         self.last_progress_update[user_id] = now
             
-            # Determine file type and upload accordingly
-            import os
-            file_extension = os.path.splitext(file_path)[1].lower()
-            
-            if file_extension in ['.jpg', '.jpeg', '.png', '.webp', '.bmp']:
-                await client.send_photo(
-                    chat_id, file_path, caption=caption,
-                    reply_to_message_id=reply_to_message_id,
-                    progress=progress_wrapper
-                )
-            elif file_extension in ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm']:
-                await client.send_video(
-                    chat_id, file_path, caption=caption,
-                    reply_to_message_id=reply_to_message_id,
-                    progress=progress_wrapper
-                )
-            elif file_extension in ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.m4a']:
-                await client.send_audio(
-                    chat_id, file_path, caption=caption,
-                    reply_to_message_id=reply_to_message_id,
-                    progress=progress_wrapper
-                )
-            elif file_extension == '.gif':
-                await client.send_animation(
-                    chat_id, file_path, caption=caption,
-                    reply_to_message_id=reply_to_message_id,
-                    progress=progress_wrapper
-                )
+            # Determine the correct media type and attributes
+            if original_message:
+                media_type, attributes = self.get_media_type_and_attributes(original_message, file_path)
             else:
-                await client.send_document(
-                    chat_id, file_path, caption=caption,
+                # Fallback to file extension detection
+                file_extension = os.path.splitext(file_path)[1].lower()
+                if file_extension in ['.jpg', '.jpeg', '.png', '.webp', '.bmp']:
+                    media_type, attributes = 'photo', {}
+                elif file_extension in ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp']:
+                    media_type, attributes = 'video', {'supports_streaming': True}
+                elif file_extension in ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.m4a', '.wma']:
+                    media_type, attributes = 'audio', {}
+                elif file_extension == '.gif':
+                    media_type, attributes = 'animation', {}
+                else:
+                    media_type, attributes = 'document', {}
+            
+            # Upload based on the determined media type
+            if media_type == 'photo':
+                await client.send_photo(
+                    chat_id, file_path, 
+                    caption=caption,
                     reply_to_message_id=reply_to_message_id,
                     progress=progress_wrapper
+                )
+            
+            elif media_type == 'video':
+                await client.send_video(
+                    chat_id, file_path, 
+                    caption=caption,
+                    reply_to_message_id=reply_to_message_id,
+                    progress=progress_wrapper,
+                    duration=attributes.get('duration'),
+                    width=attributes.get('width'),
+                    height=attributes.get('height'),
+                    supports_streaming=attributes.get('supports_streaming', True)
+                )
+            
+            elif media_type == 'animation':
+                await client.send_animation(
+                    chat_id, file_path, 
+                    caption=caption,
+                    reply_to_message_id=reply_to_message_id,
+                    progress=progress_wrapper,
+                    duration=attributes.get('duration'),
+                    width=attributes.get('width'),
+                    height=attributes.get('height')
+                )
+            
+            elif media_type == 'audio':
+                await client.send_audio(
+                    chat_id, file_path, 
+                    caption=caption,
+                    reply_to_message_id=reply_to_message_id,
+                    progress=progress_wrapper,
+                    duration=attributes.get('duration'),
+                    performer=attributes.get('performer'),
+                    title=attributes.get('title')
+                )
+            
+            elif media_type == 'voice':
+                await client.send_voice(
+                    chat_id, file_path, 
+                    caption=caption,
+                    reply_to_message_id=reply_to_message_id,
+                    progress=progress_wrapper,
+                    duration=attributes.get('duration')
+                )
+            
+            elif media_type == 'video_note':
+                await client.send_video_note(
+                    chat_id, file_path, 
+                    reply_to_message_id=reply_to_message_id,
+                    progress=progress_wrapper,
+                    duration=attributes.get('duration'),
+                    length=attributes.get('length')
+                )
+            
+            elif media_type == 'sticker':
+                await client.send_sticker(
+                    chat_id, file_path, 
+                    reply_to_message_id=reply_to_message_id,
+                    progress=progress_wrapper
+                )
+            
+            else:  # document
+                await client.send_document(
+                    chat_id, file_path, 
+                    caption=caption,
+                    reply_to_message_id=reply_to_message_id,
+                    progress=progress_wrapper,
+                    file_name=attributes.get('file_name'),
+                    force_document=False  # Let Telegram decide the best format
                 )
             
             return True

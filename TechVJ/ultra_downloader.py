@@ -21,7 +21,7 @@ from utils.logger import log_error, log_info
 from typing import Optional, List, Dict, Any
 
 class UltraDownloader:
-    """Ultra-fast downloader with advanced features"""
+    """Ultra-fast downloader with advanced features and original format preservation"""
     
     def __init__(self):
         self.download_semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
@@ -66,23 +66,66 @@ class UltraDownloader:
         except Exception as e:
             log_error(e, f"close_user_session for user {user_id}")
     
+    def get_original_filename(self, message: Message, user_id: int, timestamp: int) -> str:
+        """Get the original filename preserving the extension and format"""
+        try:
+            # Try to get original filename from different media types
+            original_name = None
+            
+            if message.document and message.document.file_name:
+                original_name = message.document.file_name
+            elif message.video and message.video.file_name:
+                original_name = message.video.file_name
+            elif message.audio and message.audio.file_name:
+                original_name = message.audio.file_name
+            elif message.photo:
+                # For photos, create a name with proper extension
+                original_name = f"photo_{message.id}.jpg"
+            elif message.video:
+                original_name = f"video_{message.id}.mp4"
+            elif message.audio:
+                original_name = f"audio_{message.id}.mp3"
+            elif message.animation:
+                original_name = f"animation_{message.id}.gif"
+            elif message.voice:
+                original_name = f"voice_{message.id}.ogg"
+            elif message.video_note:
+                original_name = f"video_note_{message.id}.mp4"
+            elif message.sticker:
+                original_name = f"sticker_{message.id}.webp"
+            else:
+                original_name = f"file_{message.id}"
+            
+            # Clean filename and preserve extension
+            if original_name:
+                # Split name and extension
+                name_part, ext_part = os.path.splitext(original_name)
+                # Clean the name part
+                clean_name = "".join(c for c in name_part if c.isalnum() or c in (' ', '-', '_')).strip()
+                # Ensure we have a name
+                if not clean_name:
+                    clean_name = f"file_{message.id}"
+                # Combine with timestamp and extension
+                filename = f"{user_id}_{timestamp}_{clean_name}{ext_part}"
+            else:
+                filename = f"{user_id}_{timestamp}_file_{message.id}"
+            
+            return filename
+            
+        except Exception as e:
+            log_error(e, f"get_original_filename")
+            return f"{user_id}_{timestamp}_file_{message.id}"
+    
     async def download_with_ultra_speed(self, client: Client, message: Message, 
                                       progress_msg: Message, user_id: int) -> Optional[str]:
-        """Ultra-fast download with advanced progress tracking"""
+        """Ultra-fast download with advanced progress tracking and original format preservation"""
         async with self.download_semaphore:
             try:
                 await ensure_download_dir()
                 
-                # Create unique filename with timestamp
+                # Create unique filename preserving original format
                 timestamp = int(time.time())
-                original_name = getattr(message.document, 'file_name', None) or \
-                               getattr(message.video, 'file_name', None) or \
-                               getattr(message.audio, 'file_name', None) or \
-                               f"file_{message.id}"
-                
-                # Clean filename
-                safe_name = "".join(c for c in original_name if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
-                filename = f"{user_id}_{timestamp}_{safe_name}"
+                filename = self.get_original_filename(message, user_id, timestamp)
                 file_path = os.path.join(DOWNLOAD_DIR, filename)
                 
                 # Progress callback with speed tracking
@@ -97,11 +140,31 @@ class UltraDownloader:
                             eta_seconds = remaining / (speed * 1024 * 1024)
                             eta = f" • ETA: {format_time(int(eta_seconds))}"
                         
+                        # Show file type being downloaded
+                        file_type = "Unknown"
+                        if message.photo:
+                            file_type = "Photo"
+                        elif message.video:
+                            file_type = "Video"
+                        elif message.audio:
+                            file_type = "Audio"
+                        elif message.animation:
+                            file_type = "Animation/GIF"
+                        elif message.document:
+                            file_type = f"Document ({message.document.mime_type or 'Unknown'})"
+                        elif message.voice:
+                            file_type = "Voice Message"
+                        elif message.video_note:
+                            file_type = "Video Note"
+                        elif message.sticker:
+                            file_type = "Sticker"
+                        
                         await safe_edit_message(
                             client, progress_msg.chat.id, progress_msg.id,
-                            f"📥 **Downloading:** {progress}\n"
+                            f"📥 **Downloading {file_type}:** {progress}\n"
                             f"📁 **Size:** {current / (1024*1024):.1f} MB / {total / (1024*1024):.1f} MB\n"
-                            f"🚀 **Speed:** {speed_text}{eta}"
+                            f"🚀 **Speed:** {speed_text}{eta}\n"
+                            f"📄 **File:** {os.path.basename(filename)}"
                         )
                     except MessageNotModified:
                         pass
@@ -138,8 +201,8 @@ class UltraDownloader:
     
     async def upload_with_ultra_speed(self, bot: Client, chat_id: int, file_path: str,
                                     message: Message, progress_msg: Message, 
-                                    caption: str = None) -> bool:
-        """Ultra-fast upload with advanced progress tracking"""
+                                    caption: str = None, original_message: Message = None) -> bool:
+        """Ultra-fast upload with original format preservation"""
         async with self.upload_semaphore:
             try:
                 # Progress callback with speed tracking
@@ -154,22 +217,43 @@ class UltraDownloader:
                             eta_seconds = remaining / (speed * 1024 * 1024)
                             eta = f" • ETA: {format_time(int(eta_seconds))}"
                         
+                        # Show file type being uploaded
+                        file_type = "File"
+                        if original_message:
+                            if original_message.photo:
+                                file_type = "Photo"
+                            elif original_message.video:
+                                file_type = "Video"
+                            elif original_message.audio:
+                                file_type = "Audio"
+                            elif original_message.animation:
+                                file_type = "Animation/GIF"
+                            elif original_message.document:
+                                file_type = f"Document"
+                            elif original_message.voice:
+                                file_type = "Voice Message"
+                            elif original_message.video_note:
+                                file_type = "Video Note"
+                            elif original_message.sticker:
+                                file_type = "Sticker"
+                        
                         await safe_edit_message(
                             bot, progress_msg.chat.id, progress_msg.id,
-                            f"📤 **Uploading:** {progress}\n"
+                            f"📤 **Uploading {file_type}:** {progress}\n"
                             f"📁 **Size:** {current / (1024*1024):.1f} MB / {total / (1024*1024):.1f} MB\n"
-                            f"🚀 **Speed:** {speed_text}{eta}"
+                            f"🚀 **Speed:** {speed_text}{eta}\n"
+                            f"📄 **File:** {os.path.basename(file_path)}"
                         )
                     except MessageNotModified:
                         pass
                     except Exception:
                         pass
                 
-                # Upload with retry mechanism
+                # Upload with retry mechanism and original format preservation
                 async def upload_operation():
                     return await speed_optimizer.optimized_upload(
                         bot, chat_id, file_path, caption, 
-                        message.id, progress_callback
+                        message.id, progress_callback, original_message
                     )
                 
                 success = await asyncio.wait_for(
@@ -186,7 +270,7 @@ class UltraDownloader:
     async def process_single_message(self, bot: Client, user_client: Client,
                                    chat_id: str, msg_id: int, user_id: int,
                                    original_message: Message) -> bool:
-        """Process a single message with ultra-fast download"""
+        """Process a single message with ultra-fast download and original format preservation"""
         try:
             # Get message with retry
             async def get_message_operation():
@@ -215,14 +299,35 @@ class UltraDownloader:
             
             # Handle media messages
             if msg.media:
+                # Determine media type for progress message
+                media_type = "File"
+                if msg.photo:
+                    media_type = "Photo"
+                elif msg.video:
+                    media_type = "Video"
+                elif msg.audio:
+                    media_type = "Audio"
+                elif msg.animation:
+                    media_type = "Animation/GIF"
+                elif msg.document:
+                    media_type = f"Document"
+                elif msg.voice:
+                    media_type = "Voice Message"
+                elif msg.video_note:
+                    media_type = "Video Note"
+                elif msg.sticker:
+                    media_type = "Sticker"
+                
                 progress_msg = await bot.send_message(
                     original_message.chat.id,
-                    f"🚀 **Processing message {msg_id}...**\n📥 **Initializing ultra-fast download...**",
+                    f"🚀 **Processing {media_type} (Message {msg_id})**\n"
+                    f"📥 **Initializing ultra-fast download...**\n"
+                    f"⚡ **Preserving original format...**",
                     reply_to_message_id=original_message.id
                 )
                 
                 try:
-                    # Download with ultra speed
+                    # Download with ultra speed and original format
                     file_path = await self.download_with_ultra_speed(
                         user_client, msg, progress_msg, user_id
                     )
@@ -230,19 +335,20 @@ class UltraDownloader:
                     if not file_path:
                         await safe_edit_message(
                             bot, progress_msg.chat.id, progress_msg.id,
-                            "❌ **Download failed**"
+                            f"❌ **{media_type} download failed**"
                         )
                         return False
                     
-                    # Upload with ultra speed
+                    # Upload with ultra speed and original format preservation
                     await safe_edit_message(
                         bot, progress_msg.chat.id, progress_msg.id,
-                        "📤 **Initializing ultra-fast upload...**"
+                        f"📤 **Initializing ultra-fast {media_type} upload...**\n"
+                        f"⚡ **Maintaining original quality...**"
                     )
                     
                     success = await self.upload_with_ultra_speed(
                         bot, original_message.chat.id, file_path,
-                        original_message, progress_msg, msg.caption
+                        original_message, progress_msg, msg.caption, msg
                     )
                     
                     # Cleanup
@@ -252,7 +358,7 @@ class UltraDownloader:
                     if success:
                         # Update stats
                         file_size = await get_file_size(file_path) if os.path.exists(file_path) else 0
-                        await db.update_download_stats(user_id, "media", int(file_size * 1024 * 1024))
+                        await db.update_download_stats(user_id, media_type.lower(), int(file_size * 1024 * 1024))
                         await db.update_user_stats(user_id)
                     
                     return success
@@ -260,7 +366,7 @@ class UltraDownloader:
                 except Exception as e:
                     await safe_edit_message(
                         bot, progress_msg.chat.id, progress_msg.id,
-                        f"❌ **Error:** {str(e)[:100]}..."
+                        f"❌ **{media_type} Error:** {str(e)[:100]}..."
                     )
                     return False
             
@@ -272,7 +378,7 @@ class UltraDownloader:
     
     async def process_ultra_batch_download(self, bot: Client, user_id: int, url: str,
                                          original_message: Message) -> bool:
-        """Process ultra-fast batch download from URL"""
+        """Process ultra-fast batch download from URL with original format preservation"""
         try:
             # Check rate limit
             if not await rate_limiter.is_allowed(user_id):
@@ -334,7 +440,8 @@ class UltraDownloader:
                 f"📊 **Total messages:** {total_messages}\n"
                 f"⚡ **Concurrent downloads:** {MAX_CONCURRENT_DOWNLOADS}\n"
                 f"📈 **Progress:** 0/{total_messages}\n"
-                f"🎯 **Success rate:** 0%",
+                f"🎯 **Success rate:** 0%\n"
+                f"📄 **Original format preservation:** ✅",
                 reply_to_message_id=original_message.id
             )
             
@@ -400,7 +507,8 @@ class UltraDownloader:
                             f"❌ **Failed:** {failed_downloads}\n"
                             f"📈 **Success rate:** {success_rate:.1f}%\n"
                             f"{eta_text}"
-                            f"⏰ **Elapsed:** {format_time(elapsed_time)}"
+                            f"⏰ **Elapsed:** {format_time(elapsed_time)}\n"
+                            f"📄 **Original format:** ✅ Preserved"
                         )
                     
                 except Exception as e:
@@ -421,8 +529,9 @@ class UltraDownloader:
                 f"❌ **Failed:** {failed_downloads}\n"
                 f"📈 **Success rate:** {success_rate:.1f}%\n"
                 f"⚡ **Average speed:** {avg_speed:.1f} files/sec\n"
-                f"⏱️ **Total time:** {format_time(total_time)}\n\n"
-                f"🚀 **Ultra-fast processing completed!**"
+                f"⏱️ **Total time:** {format_time(total_time)}\n"
+                f"📄 **Original format:** ✅ All files preserved\n\n"
+                f"🚀 **Ultra-fast processing with original quality completed!**"
             )
             
             download_manager.stop_download(user_id)
